@@ -21,7 +21,7 @@ st.write("Upload a PDF and ask questions from its content.")
 # ---- Load API keys ----
 GROQ_API_KEY = st.secrets["groq"]["api_key"]
 HF_TOKEN = st.secrets["hf"]["token"]
-os.environ["HF_TOKEN"] = HF_TOKEN
+os.environ["HF_TOKEN"] = HF_TOKEN  # ensure HF_TOKEN is set
 
 # ---- File Upload ----
 uploaded_file = st.file_uploader("📤 Upload a PDF file", type=["pdf"])
@@ -36,8 +36,8 @@ if uploaded_file is not None:
     loader = PyPDFLoader(tmp_file_path)
     documents = loader.load()
 
-    # Create embeddings and vectorstore
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # Create embeddings and vectorstore (downloads model automatically)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2", model_kwargs={"device": "cpu"})
     vectorstore = Chroma.from_documents(documents, embedding=embeddings)
     retriever = vectorstore.as_retriever()
     st.success("✅ PDF processed and vectorstore created successfully")
@@ -50,7 +50,7 @@ if retriever:
         # Initialize Groq LLM
         llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile")
 
-        # System prompt (no Nepali restriction)
+        # System prompt
         system_prompt = (
             "You are a helpful assistant. "
             "Use only the given context to answer the question. "
