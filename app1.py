@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-import tempfile
+from dotenv import load_dotenv
 
 # LangChain & Groq
 from langchain_groq import ChatGroq
@@ -12,49 +12,76 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# ---- Streamlit Layout ----
-st.set_page_config(page_title="Groq PDF RAG", layout="wide")
-st.title("📄 Groq PDF Q&A")
-st.write("Upload a PDF and ask questions from its content.")
+# -----------------------------
+# Load environment / Streamlit secrets
+# -----------------------------
+load_dotenv()
 
-# ---- Load API keys ----
-GROQ_API_KEY = st.secrets["groq"]["api_key"]
-HF_TOKEN = st.secrets["hf"]["token"]
-os.environ["HF_TOKEN"] = HF_TOKEN  # ensure HF_TOKEN is set
+HF_TOKEN = os.getenv("HF_TOKEN") or st.secrets.get("hf", {}).get("token")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or st.secrets.get("groq", {}).get("api_key")
 
-# ---- File Upload ----
-uploaded_file = st.file_uploader("📤 Upload a PDF file", type=["pdf"])
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="Sewa Chatbot (Nepali)", layout="wide")
+st.title("📄 Sewa Chatbot (नेपाली)")
+st.write("कृपया PDF अपलोड गर्नुहोस् र सोध्न सुरु गर्नुहोस्।")
+
+# -----------------------------
+# PDF Upload
+# -----------------------------
+uploaded_file = st.file_uploader("📤 यहाँ PDF अपलोड गर्नुहोस्", type=["pdf"])
 
 retriever = None
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_file_path = tmp_file.name
+if uploaded_file:
+    with st.spinner("📑 PDF पढ्दैछु..."):
+        # Save to a temporary file
+        temp_path = f"./temp_{uploaded_file.name}"
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-    # Load PDF into documents
-    loader = PyPDFLoader(tmp_file_path)
-    documents = loader.load()
+        # Load and split
+        loader = PyPDFLoader(temp_path)
+        docs = loader.load()
 
-    # Create embeddings and vectorstore (downloads model automatically)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2", model_kwargs={"device": "cpu"})
-    vectorstore = Chroma.from_documents(documents, embedding=embeddings)
-    retriever = vectorstore.as_retriever()
-    st.success("✅ PDF processed and vectorstore created successfully")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=200
+        )
+        splits = text_splitter.split_documents(docs)
 
-# ---- User input & RAG ----
+        # Embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"}
+        )
+
+        # Create vectorstore (in-memory, no persist)
+        vectorstore = Chroma.from_documents(splits, embedding=embeddings)
+        retriever = vectorstore.as_retriever()
+
+        st.success("✅ Vectorstore तयार भयो। अब तपाईं प्रश्न सोध्न सक्नुहुन्छ।")
+
+# -----------------------------
+# RAG Q&A Loop
+# -----------------------------
 if retriever:
-    if prompt := st.chat_input("Ask a question about the uploaded PDF..."):
+    if prompt := st.chat_input("👉 प्रश्न लेख्नुहोस्..."):
         st.chat_message("user").write(prompt)
 
         # Initialize Groq LLM
         llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile")
 
-        # System prompt
+        # System prompt enforcing Nepali-only answers
         system_prompt = (
-            "You are a helpful assistant. "
-            "Use only the given context to answer the question. "
-            "If the context is empty or irrelevant, reply with 'I don't know'.\n\n{context}"
+            "तपाईँ एउटा सहायक सहायक हुनुहुन्छ। "
+            "सधैं केवल नेपाली भाषामा मात्र जवाफ दिनुहोस्। "
+            "कुनै पनि हालतमा हिन्दी वा अन्य भाषा प्रयोग नगर्नुहोस्। "
+            "दिइएको प्रसङ्ग (context) प्रयोग गरेर मात्र जवाफ दिनुहोस्। "
+            "यदि प्रसङ्ग खाली छ वा सम्बन्धित छैन भने 'मलाई थाहा छैन' भन्नुहोस्। "
+            "जवाफ छोटकरीमा दिनुहोस् (अधिकतम ८ वाक्यसम्म)।\n\n{context}"
         )
 
         qa_prompt = ChatPromptTemplate.from_messages(
@@ -64,13 +91,16 @@ if retriever:
             ]
         )
 
-        # Create RAG chain
+        # Build chain
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
+        # Prepend explicit Nepali instruction
+        user_input = "नेपालीमा जवाफ दिनुहोस्: " + prompt
+
         # Run RAG
-        rag_response = rag_chain.invoke({"input": prompt})
+        rag_response = rag_chain.invoke({"input": user_input})
         answer = rag_response["answer"]
 
-        # Show response
+        # Show answer
         st.chat_message("assistant").write(answer)
