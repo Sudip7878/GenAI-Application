@@ -25,18 +25,18 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY") or st.secrets.get("groq", {}).get("api_
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="Sewa Chatbot (Nepali)", layout="wide")
-st.title("📄 Sewa Chatbot (नेपाली)")
-st.write("कृपया PDF अपलोड गर्नुहोस् र सोध्न सुरु गर्नुहोस्।")
+st.set_page_config(page_title="Chat With Your PDF", layout="wide")
+st.title("Chat With Your PDF")
+st.write("Upload a PDF and ask anything related to it.")
 
 # -----------------------------
 # PDF Upload
 # -----------------------------
-uploaded_file = st.file_uploader("📤 यहाँ PDF अपलोड गर्नुहोस्", type=["pdf"])
+uploaded_file = st.file_uploader("📤 Upload your PDF here", type=["pdf"])
 
 retriever = None
 if uploaded_file:
-    with st.spinner("📑 PDF पढ्दैछु..."):
+    with st.spinner("📑 Reading PDF..."):
         # Save to a temporary file
         temp_path = f"./temp_{uploaded_file.name}"
         with open(temp_path, "wb") as f:
@@ -62,26 +62,25 @@ if uploaded_file:
         vectorstore = Chroma.from_documents(splits, embedding=embeddings)
         retriever = vectorstore.as_retriever()
 
-        st.success("✅ Vectorstore तयार भयो। अब तपाईं प्रश्न सोध्न सक्नुहुन्छ।")
+        st.success("✅ Vectorstore created successfully. You can now start asking questions!")
 
 # -----------------------------
 # RAG Q&A Loop
 # -----------------------------
 if retriever:
-    if prompt := st.chat_input("👉 प्रश्न लेख्नुहोस्..."):
+    if prompt := st.chat_input("👉 Ask your question..."):
         st.chat_message("user").write(prompt)
 
         # Initialize Groq LLM
         llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile")
 
-        # System prompt enforcing Nepali-only answers
+        # System prompt (English)
         system_prompt = (
-            "तपाईँ एउटा सहायक सहायक हुनुहुन्छ। "
-            "सधैं केवल नेपाली भाषामा मात्र जवाफ दिनुहोस्। "
-            "कुनै पनि हालतमा हिन्दी वा अन्य भाषा प्रयोग नगर्नुहोस्। "
-            "दिइएको प्रसङ्ग (context) प्रयोग गरेर मात्र जवाफ दिनुहोस्। "
-            "यदि प्रसङ्ग खाली छ वा सम्बन्धित छैन भने 'मलाई थाहा छैन' भन्नुहोस्। "
-            "जवाफ छोटकरीमा दिनुहोस् (अधिकतम ८ वाक्यसम्म)।\n\n{context}"
+            "You are a helpful assistant. "
+            "Always answer in clear, simple English. "
+            "Use only the provided context to answer. "
+            "If the context is empty or irrelevant, say 'I don’t know'. "
+            "Keep answers short and concise (maximum 8 sentences).\n\n{context}"
         )
 
         qa_prompt = ChatPromptTemplate.from_messages(
@@ -95,11 +94,8 @@ if retriever:
         question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
         rag_chain = create_retrieval_chain(retriever, question_answer_chain)
 
-        # Prepend explicit Nepali instruction
-        user_input = "नेपालीमा जवाफ दिनुहोस्: " + prompt
-
         # Run RAG
-        rag_response = rag_chain.invoke({"input": user_input})
+        rag_response = rag_chain.invoke({"input": prompt})
         answer = rag_response["answer"]
 
         # Show answer
